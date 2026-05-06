@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from database import SessionLocal
+from database import SessionLocal, engine, Base
 from models import OrderRecord
 from schemas import OrderCreate, OrderUpdate
 
@@ -12,25 +12,30 @@ app = FastAPI(
     version="4.0.0"
 )
 
-# ---------------------------------
-# CORS for React frontend
-# ---------------------------------
+# -------------------------------------------------
+# TEMP QUICK FIX FOR RAILWAY:
+# Auto-create table if it does not exist.
+# If you fully use Alembic later, you can remove this.
+# -------------------------------------------------
+Base.metadata.create_all(bind=engine)
+
+# -------------------------------------------------
+# CORS
+# -------------------------------------------------
+# This is okay for now because you are not using cookies/auth.
+# Later you can lock it down to your exact frontend domains.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "*"   # keep this for deployment/testing; later you can restrict it
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# ---------------------------------
-# Dependency: Get DB Session
-# ---------------------------------
+# -------------------------------------------------
+# Dependency: database session
+# -------------------------------------------------
 def get_db():
     db = SessionLocal()
     try:
@@ -39,9 +44,9 @@ def get_db():
         db.close()
 
 
-# ---------------------------------
+# -------------------------------------------------
 # Home
-# ---------------------------------
+# -------------------------------------------------
 @app.get("/")
 def home():
     return {
@@ -51,17 +56,17 @@ def home():
     }
 
 
-# ---------------------------------
-# Health Check
-# ---------------------------------
+# -------------------------------------------------
+# Health check
+# -------------------------------------------------
 @app.get("/health")
 def health():
     return {"status": "API is running successfully"}
 
 
-# ---------------------------------
-# Get All Orders
-# ---------------------------------
+# -------------------------------------------------
+# Get all orders
+# -------------------------------------------------
 @app.get("/orders")
 def get_all_orders(db: Session = Depends(get_db)):
     records = db.query(OrderRecord).all()
@@ -83,9 +88,9 @@ def get_all_orders(db: Session = Depends(get_db)):
     }
 
 
-# ---------------------------------
-# Find Order by Equipment
-# ---------------------------------
+# -------------------------------------------------
+# Find order by equipment
+# -------------------------------------------------
 @app.get("/find-order/{equipment}")
 def find_order(equipment: str, db: Session = Depends(get_db)):
     equipment = equipment.strip().upper()
@@ -106,9 +111,9 @@ def find_order(equipment: str, db: Session = Depends(get_db)):
     }
 
 
-# ---------------------------------
-# Add New Order
-# ---------------------------------
+# -------------------------------------------------
+# Add new order
+# -------------------------------------------------
 @app.post("/orders", status_code=201)
 def add_order(order: OrderCreate, db: Session = Depends(get_db)):
     equipment = order.Equipment.strip().upper()
@@ -149,9 +154,9 @@ def add_order(order: OrderCreate, db: Session = Depends(get_db)):
     }
 
 
-# ---------------------------------
-# Update Existing Order
-# ---------------------------------
+# -------------------------------------------------
+# Update existing order
+# -------------------------------------------------
 @app.put("/orders/{equipment}")
 def update_order(equipment: str, order_update: OrderUpdate, db: Session = Depends(get_db)):
     equipment = equipment.strip().upper()
@@ -192,9 +197,9 @@ def update_order(equipment: str, order_update: OrderUpdate, db: Session = Depend
     }
 
 
-# ---------------------------------
-# Delete an Order
-# ---------------------------------
+# -------------------------------------------------
+# Delete an order
+# -------------------------------------------------
 @app.delete("/orders/{equipment}")
 def delete_order(equipment: str, db: Session = Depends(get_db)):
     equipment = equipment.strip().upper()
