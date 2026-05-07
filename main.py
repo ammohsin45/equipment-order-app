@@ -14,7 +14,7 @@ from schemas import OrderCreate, OrderUpdate
 app = FastAPI(
     title="Equipment Order Lookup API",
     description="FastAPI app using PostgreSQL database",
-    version="5.1.0"
+    version="5.2.0"
 )
 
 # Auto-create table if missing
@@ -30,9 +30,9 @@ app.add_middleware(
 )
 
 
-# ---------------------------------
+# -------------------------------------------------
 # Dependency: database session
-# ---------------------------------
+# -------------------------------------------------
 def get_db():
     db = SessionLocal()
     try:
@@ -41,12 +41,13 @@ def get_db():
         db.close()
 
 
-# ---------------------------------
+# -------------------------------------------------
 # Helper functions
-# ---------------------------------
+# -------------------------------------------------
 def clean_text(value):
     if value is None:
         return None
+
     if pd.isna(value):
         return None
 
@@ -65,15 +66,27 @@ def clean_equipment(value):
     return None
 
 
-def none_if_nan(value):
+def safe_date(value):
+    """
+    Convert Excel / pandas values safely to Python date or None.
+    """
+    if value is None:
+        return None
+
     if pd.isna(value):
         return None
-    return value
+
+    parsed = pd.to_datetime(value, errors="coerce")
+
+    if pd.isna(parsed):
+        return None
+
+    return parsed.date()
 
 
-# ---------------------------------
+# -------------------------------------------------
 # Home
-# ---------------------------------
+# -------------------------------------------------
 @app.get("/")
 def home():
     return {
@@ -83,17 +96,17 @@ def home():
     }
 
 
-# ---------------------------------
+# -------------------------------------------------
 # Health check
-# ---------------------------------
+# -------------------------------------------------
 @app.get("/health")
 def health():
     return {"status": "API is running successfully"}
 
 
-# ---------------------------------
+# -------------------------------------------------
 # Dashboard summary
-# ---------------------------------
+# -------------------------------------------------
 @app.get("/orders/summary")
 def orders_summary(db: Session = Depends(get_db)):
     total = db.query(OrderRecord).count()
@@ -111,9 +124,9 @@ def orders_summary(db: Session = Depends(get_db)):
     }
 
 
-# ---------------------------------
+# -------------------------------------------------
 # Get paginated orders
-# ---------------------------------
+# -------------------------------------------------
 @app.get("/orders")
 def get_all_orders(
     page: int = Query(1, ge=1),
@@ -168,9 +181,9 @@ def get_all_orders(
     }
 
 
-# ---------------------------------
+# -------------------------------------------------
 # Find order by equipment
-# ---------------------------------
+# -------------------------------------------------
 @app.get("/find-order/{equipment}")
 def find_order(equipment: str, db: Session = Depends(get_db)):
     equipment = equipment.strip().upper()
@@ -191,9 +204,9 @@ def find_order(equipment: str, db: Session = Depends(get_db)):
     }
 
 
-# ---------------------------------
+# -------------------------------------------------
 # Add new order
-# ---------------------------------
+# -------------------------------------------------
 @app.post("/orders", status_code=201)
 def add_order(order: OrderCreate, db: Session = Depends(get_db)):
     equipment = clean_equipment(order.Equipment)
@@ -237,9 +250,9 @@ def add_order(order: OrderCreate, db: Session = Depends(get_db)):
     }
 
 
-# ---------------------------------
+# -------------------------------------------------
 # Update existing order
-# ---------------------------------
+# -------------------------------------------------
 @app.put("/orders/{equipment}")
 def update_order(equipment: str, order_update: OrderUpdate, db: Session = Depends(get_db)):
     equipment = equipment.strip().upper()
@@ -280,9 +293,9 @@ def update_order(equipment: str, order_update: OrderUpdate, db: Session = Depend
     }
 
 
-# ---------------------------------
+# -------------------------------------------------
 # Delete an order
-# ---------------------------------
+# -------------------------------------------------
 @app.delete("/orders/{equipment}")
 def delete_order(equipment: str, db: Session = Depends(get_db)):
     equipment = equipment.strip().upper()
@@ -311,9 +324,9 @@ def delete_order(equipment: str, db: Session = Depends(get_db)):
     }
 
 
-# ---------------------------------
+# -------------------------------------------------
 # Import Excel into DB
-# ---------------------------------
+# -------------------------------------------------
 @app.post("/orders/import-excel")
 async def import_excel(file: UploadFile = File(...), db: Session = Depends(get_db)):
     filename = file.filename.lower()
@@ -340,45 +353,24 @@ async def import_excel(file: UploadFile = File(...), db: Session = Depends(get_d
                 detail="Excel must contain at least columns: Equipment and Order"
             )
 
+        # Add optional columns if missing
         optional_columns = ["Vendor", "DeliveryDate", "Status", "Notes"]
         for col in optional_columns:
             if col not in df.columns:
                 df[col] = None
 
-        # Clean text fields
-        df["Equipment"] = df["Equipment"].apply(clean_equipment)
-        df["Order"] = df["Order"].apply(clean_text)
-        df["Vendor"] = df["Vendor"].apply(clean_text)
-        df["Status"] = df["Status"].apply(clean_text)
-        df["Notes"] = df["Notes"].apply(clean_text)
-
-        # Convert date safely
-        df["DeliveryDate"] = pd.to_datetime(df["DeliveryDate"], errors="coerce")
-        df["DeliveryDate"] = df["DeliveryDate"].apply(
-            lambda x: x.date() if pd.notna(x) else None
-        )
-
-        # Force all remaining NaN/NaT to None
-        df = df.astype(object)
-        df = df.where(pd.notna(df), None)
-
-        # Remove invalid rows
-        df = df[df["Equipment"].notna() & df["Order"].notna()]
-
-        # Remove duplicates in uploaded file (keep last)
-        df = df.drop_duplicates(subset=["Equipment"], keep="last")
-
         inserted = 0
         updated = 0
 
         for _, row in df.iterrows():
-            equipment = none_if_nan(row["Equipment"])
-            order_number = none_if_nan(row["Order"])
-            vendor = none_if_nan(row["Vendor"])
-            delivery_date = none_if_nan(row["DeliveryDate"])
-            status = none_if_nan(row["Status"])
-            notes = none_if_nan(row["Notes"])
+            equipment = clean_equipment(row.get("Equipment"))
+            order_number = clean_text(row.get("Order"))
+            vendor = clean_text(row.get("Vendor"))
+            status = clean_text(row.get("Status"))
+            notes = clean_text(row.get("Notes"))
+            delivery_date = safe_date(row.get("DeliveryDate"))
 
+            # Skip invalid rows
             if not equipment or not order_number:
                 continue
 
