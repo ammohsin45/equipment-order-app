@@ -1,6 +1,12 @@
-from fastapi import FastAPI, Depends, HTTPException
+import math
+from io import BytesIO
+from datetime import datetime
+
+import pandas as pd
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import or_, func
 
 from database import SessionLocal, engine, Base
 from models import OrderRecord
@@ -9,21 +15,13 @@ from schemas import OrderCreate, OrderUpdate
 app = FastAPI(
     title="Equipment Order Lookup API",
     description="FastAPI app using PostgreSQL database",
-    version="4.0.0"
+    version="5.0.0"
 )
 
-# -------------------------------------------------
-# TEMP QUICK FIX FOR RAILWAY:
-# Auto-create table if it does not exist.
-# If you fully use Alembic later, you can remove this.
-# -------------------------------------------------
+# Quick deployment helper: create tables if missing
 Base.metadata.create_all(bind=engine)
 
-# -------------------------------------------------
 # CORS
-# -------------------------------------------------
-# This is okay for now because you are not using cookies/auth.
-# Later you can lock it down to your exact frontend domains.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -33,9 +31,9 @@ app.add_middleware(
 )
 
 
-# -------------------------------------------------
+# ---------------------------------
 # Dependency: database session
-# -------------------------------------------------
+# ---------------------------------
 def get_db():
     db = SessionLocal()
     try:
@@ -44,9 +42,26 @@ def get_db():
         db.close()
 
 
-# -------------------------------------------------
+# ---------------------------------
+# Helpers
+# ---------------------------------
+def clean_text(value):
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text == "" or text.lower() == "nan":
+        return None
+    return text
+
+
+def clean_equipment(value):
+    text = clean_text(value)
+    return text.upper() if text else None
+
+
+# ---------------------------------
 # Home
-# -------------------------------------------------
+# ---------------------------------
 @app.get("/")
 def home():
     return {
@@ -56,23 +71,76 @@ def home():
     }
 
 
-# -------------------------------------------------
+# ---------------------------------
 # Health check
-# -------------------------------------------------
+# ---------------------------------
 @app.get("/health")
 def health():
     return {"status": "API is running successfully"}
 
 
-# -------------------------------------------------
-# Get all orders
-# -------------------------------------------------
-@app.get("/orders")
-def get_all_orders(db: Session = Depends(get_db)):
-    records = db.query(OrderRecord).all()
+# ---------------------------------
+# Dashboard summary
+# ---------------------------------
+@app.get("/orders/summary")
+def orders_summary(db: Session = Depends(get_db)):
+    total = db.query(OrderRecord).count()
+    open_count = db.query(OrderRecord).filter(func.lower(OrderRecord.status) == "open").count()
+    pending_count = db.query(OrderRecord).filter(func.lower(OrderRecord.status) == "pending").count()
+    closed_count = db.query(OrderRecord).filter(func.lower(OrderRecord.status) == "closed").count()
+    cancelled_count = db.query(OrderRecord).filter(func.lower(OrderRecord.status) == "cancelled").count()
 
     return {
-        "count": len(records),
+        "total": total,
+        "open": open_count,
+        "pending": pending_count,
+        "closed": closed_count,
+        "cancelled": cancelled_count
+    }
+
+
+# ---------------------------------
+# Get paginated orders
+# ---------------------------------
+@app.get("/orders")
+def get_all_orders(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    search: str | None = Query(None),
+    status: str | None = Query(None),
+    db: Session = Depends(get_db)
+):
+    query = db.query(OrderRecord)
+
+    if search:
+        search_text = f"%{search.strip()}%"
+        query = query.filter(
+            or_(
+                OrderRecord.equipment.ilike(search_text),
+                OrderRecord.order_number.ilike(search_text),
+                OrderRecord.vendor.ilike(search_text),
+                OrderRecord.notes.ilike(search_text)
+            )
+        )
+
+    if status and status.lower() != "all":
+        query = query.filter(func.lower(OrderRecord.status) == status.lower())
+
+    total = query.count()
+    total_pages = math.ceil(total / page_size) if total > 0 else 1
+
+    records = (
+        query.order_by(OrderRecord.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    return {
+        "count": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
         "data": [
             {
                 "id": row.id,
@@ -88,9 +156,9 @@ def get_all_orders(db: Session = Depends(get_db)):
     }
 
 
-# -------------------------------------------------
+# ---------------------------------
 # Find order by equipment
-# -------------------------------------------------
+# ---------------------------------
 @app.get("/find-order/{equipment}")
 def find_order(equipment: str, db: Session = Depends(get_db)):
     equipment = equipment.strip().upper()
@@ -111,13 +179,16 @@ def find_order(equipment: str, db: Session = Depends(get_db)):
     }
 
 
-# -------------------------------------------------
+# ---------------------------------
 # Add new order
-# -------------------------------------------------
+# ---------------------------------
 @app.post("/orders", status_code=201)
 def add_order(order: OrderCreate, db: Session = Depends(get_db)):
-    equipment = order.Equipment.strip().upper()
-    order_number = order.Order.strip()
+    equipment = clean_equipment(order.Equipment)
+    order_number = clean_text(order.Order)
+
+    if not equipment or not order_number:
+        raise HTTPException(status_code=400, detail="Equipment and Order are required")
 
     existing = db.query(OrderRecord).filter(OrderRecord.equipment == equipment).first()
 
@@ -130,10 +201,10 @@ def add_order(order: OrderCreate, db: Session = Depends(get_db)):
     new_order = OrderRecord(
         equipment=equipment,
         order_number=order_number,
-        vendor=order.Vendor.strip() if order.Vendor else None,
+        vendor=clean_text(order.Vendor),
         delivery_date=order.DeliveryDate,
-        status=order.Status.strip() if order.Status else None,
-        notes=order.Notes.strip() if order.Notes else None
+        status=clean_text(order.Status),
+        notes=clean_text(order.Notes)
     )
 
     db.add(new_order)
@@ -154,9 +225,9 @@ def add_order(order: OrderCreate, db: Session = Depends(get_db)):
     }
 
 
-# -------------------------------------------------
+# ---------------------------------
 # Update existing order
-# -------------------------------------------------
+# ---------------------------------
 @app.put("/orders/{equipment}")
 def update_order(equipment: str, order_update: OrderUpdate, db: Session = Depends(get_db)):
     equipment = equipment.strip().upper()
@@ -167,19 +238,19 @@ def update_order(equipment: str, order_update: OrderUpdate, db: Session = Depend
         raise HTTPException(status_code=404, detail="Equipment not found")
 
     if order_update.Order is not None:
-        record.order_number = order_update.Order.strip()
+        record.order_number = clean_text(order_update.Order)
 
     if order_update.Vendor is not None:
-        record.vendor = order_update.Vendor.strip()
+        record.vendor = clean_text(order_update.Vendor)
 
     if order_update.DeliveryDate is not None:
         record.delivery_date = order_update.DeliveryDate
 
     if order_update.Status is not None:
-        record.status = order_update.Status.strip()
+        record.status = clean_text(order_update.Status)
 
     if order_update.Notes is not None:
-        record.notes = order_update.Notes.strip()
+        record.notes = clean_text(order_update.Notes)
 
     db.commit()
     db.refresh(record)
@@ -197,9 +268,9 @@ def update_order(equipment: str, order_update: OrderUpdate, db: Session = Depend
     }
 
 
-# -------------------------------------------------
+# ---------------------------------
 # Delete an order
-# -------------------------------------------------
+# ---------------------------------
 @app.delete("/orders/{equipment}")
 def delete_order(equipment: str, db: Session = Depends(get_db)):
     equipment = equipment.strip().upper()
@@ -226,3 +297,87 @@ def delete_order(equipment: str, db: Session = Depends(get_db)):
         "message": "Order deleted successfully",
         "deleted_data": deleted_data
     }
+
+
+# ---------------------------------
+# Import Excel into DB
+# ---------------------------------
+@app.post("/orders/import-excel")
+async def import_excel(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    if not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Please upload an Excel file (.xlsx or .xls)")
+
+    try:
+        contents = await file.read()
+        excel_data = BytesIO(contents)
+
+        if file.filename.lower().endswith(".xlsx"):
+            df = pd.read_excel(excel_data, engine="openpyxl")
+        else:
+            df = pd.read_excel(excel_data, engine="xlrd")
+
+        required_columns = {"Equipment", "Order"}
+        if not required_columns.issubset(df.columns):
+            raise HTTPException(
+                status_code=400,
+                detail="Excel must contain at least columns: Equipment and Order"
+            )
+
+        optional_columns = ["Vendor", "DeliveryDate", "Status", "Notes"]
+        for col in optional_columns:
+            if col not in df.columns:
+                df[col] = None
+
+        # Clean and normalize
+        df["Equipment"] = df["Equipment"].apply(clean_equipment)
+        df["Order"] = df["Order"].apply(clean_text)
+        df["Vendor"] = df["Vendor"].apply(clean_text)
+        df["Status"] = df["Status"].apply(clean_text)
+        df["Notes"] = df["Notes"].apply(clean_text)
+        df["DeliveryDate"] = pd.to_datetime(df["DeliveryDate"], errors="coerce").dt.date
+
+        # Remove invalid rows
+        df = df[df["Equipment"].notna() & df["Order"].notna()]
+
+        # Remove duplicates in uploaded sheet (keep last)
+        df = df.drop_duplicates(subset=["Equipment"], keep="last")
+
+        inserted = 0
+        updated = 0
+
+        for _, row in df.iterrows():
+            existing = db.query(OrderRecord).filter(OrderRecord.equipment == row["Equipment"]).first()
+
+            if existing:
+                existing.order_number = row["Order"]
+                existing.vendor = row["Vendor"]
+                existing.delivery_date = row["DeliveryDate"]
+                existing.status = row["Status"]
+                existing.notes = row["Notes"]
+                updated += 1
+            else:
+                new_order = OrderRecord(
+                    equipment=row["Equipment"],
+                    order_number=row["Order"],
+                    vendor=row["Vendor"],
+                    delivery_date=row["DeliveryDate"],
+                    status=row["Status"],
+                    notes=row["Notes"]
+                )
+                db.add(new_order)
+                inserted += 1
+
+        db.commit()
+
+        return {
+            "message": "Excel imported successfully",
+            "inserted": inserted,
+            "updated": updated,
+            "total_processed": int(inserted + updated)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
