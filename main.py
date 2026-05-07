@@ -1,6 +1,5 @@
 import math
 from io import BytesIO
-from datetime import datetime
 
 import pandas as pd
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query
@@ -18,7 +17,7 @@ app = FastAPI(
     version="5.0.0"
 )
 
-# Quick deployment helper: create tables if missing
+# Auto-create table if missing
 Base.metadata.create_all(bind=engine)
 
 # CORS
@@ -43,20 +42,25 @@ def get_db():
 
 
 # ---------------------------------
-# Helpers
+# Helper functions
 # ---------------------------------
 def clean_text(value):
     if value is None:
         return None
+
     text = str(value).strip()
+
     if text == "" or text.lower() == "nan":
         return None
+
     return text
 
 
 def clean_equipment(value):
     text = clean_text(value)
-    return text.upper() if text else None
+    if text:
+        return text.upper()
+    return None
 
 
 # ---------------------------------
@@ -106,8 +110,8 @@ def orders_summary(db: Session = Depends(get_db)):
 def get_all_orders(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
-    search: str | None = Query(None),
-    status: str | None = Query(None),
+    search: str = Query(None),
+    status: str = Query(None),
     db: Session = Depends(get_db)
 ):
     query = db.query(OrderRecord)
@@ -304,14 +308,19 @@ def delete_order(equipment: str, db: Session = Depends(get_db)):
 # ---------------------------------
 @app.post("/orders/import-excel")
 async def import_excel(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    if not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="Please upload an Excel file (.xlsx or .xls)")
+    filename = file.filename.lower()
+
+    if not filename.endswith(".xlsx") and not filename.endswith(".xls"):
+        raise HTTPException(
+            status_code=400,
+            detail="Please upload an Excel file (.xlsx or .xls)"
+        )
 
     try:
         contents = await file.read()
         excel_data = BytesIO(contents)
 
-        if file.filename.lower().endswith(".xlsx"):
+        if filename.endswith(".xlsx"):
             df = pd.read_excel(excel_data, engine="openpyxl")
         else:
             df = pd.read_excel(excel_data, engine="xlrd")
@@ -328,25 +337,32 @@ async def import_excel(file: UploadFile = File(...), db: Session = Depends(get_d
             if col not in df.columns:
                 df[col] = None
 
-        # Clean and normalize
+        # Clean text fields
         df["Equipment"] = df["Equipment"].apply(clean_equipment)
         df["Order"] = df["Order"].apply(clean_text)
         df["Vendor"] = df["Vendor"].apply(clean_text)
         df["Status"] = df["Status"].apply(clean_text)
         df["Notes"] = df["Notes"].apply(clean_text)
-        df["DeliveryDate"] = pd.to_datetime(df["DeliveryDate"], errors="coerce").dt.date
+
+        # Convert dates safely
+        df["DeliveryDate"] = pd.to_datetime(df["DeliveryDate"], errors="coerce")
+        df["DeliveryDate"] = df["DeliveryDate"].apply(
+            lambda x: x.date() if pd.notna(x) else None
+        )
 
         # Remove invalid rows
         df = df[df["Equipment"].notna() & df["Order"].notna()]
 
-        # Remove duplicates in uploaded sheet (keep last)
+        # Remove duplicate equipment in uploaded file (keep last)
         df = df.drop_duplicates(subset=["Equipment"], keep="last")
 
         inserted = 0
         updated = 0
 
         for _, row in df.iterrows():
-            existing = db.query(OrderRecord).filter(OrderRecord.equipment == row["Equipment"]).first()
+            existing = db.query(OrderRecord).filter(
+                OrderRecord.equipment == row["Equipment"]
+            ).first()
 
             if existing:
                 existing.order_number = row["Order"]
@@ -373,11 +389,14 @@ async def import_excel(file: UploadFile = File(...), db: Session = Depends(get_d
             "message": "Excel imported successfully",
             "inserted": inserted,
             "updated": updated,
-            "total_processed": int(inserted + updated)
+            "total_processed": inserted + updated
         }
 
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Import failed: {str(e)}"
+        )
