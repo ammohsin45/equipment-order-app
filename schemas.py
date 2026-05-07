@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import date
 
+
 class OrderCreate(BaseModel):
     Equipment: str
     Order: str
