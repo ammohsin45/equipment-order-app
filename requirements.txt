@@ -5,3 +5,6 @@ psycopg2-binary
 python-dotenv
 pydantic
 alembic
+pandas
+openpyxl
+python-multipart
