@@ -14,7 +14,7 @@ from schemas import OrderCreate, OrderUpdate
 app = FastAPI(
     title="Equipment Order Lookup API",
     description="FastAPI app using PostgreSQL database",
-    version="5.0.0"
+    version="5.1.0"
 )
 
 # Auto-create table if missing
@@ -47,6 +47,8 @@ def get_db():
 def clean_text(value):
     if value is None:
         return None
+    if pd.isna(value):
+        return None
 
     text = str(value).strip()
 
@@ -61,6 +63,12 @@ def clean_equipment(value):
     if text:
         return text.upper()
     return None
+
+
+def none_if_nan(value):
+    if pd.isna(value):
+        return None
+    return value
 
 
 # ---------------------------------
@@ -344,41 +352,55 @@ async def import_excel(file: UploadFile = File(...), db: Session = Depends(get_d
         df["Status"] = df["Status"].apply(clean_text)
         df["Notes"] = df["Notes"].apply(clean_text)
 
-        # Convert dates safely
+        # Convert date safely
         df["DeliveryDate"] = pd.to_datetime(df["DeliveryDate"], errors="coerce")
         df["DeliveryDate"] = df["DeliveryDate"].apply(
             lambda x: x.date() if pd.notna(x) else None
         )
 
+        # Force all remaining NaN/NaT to None
+        df = df.astype(object)
+        df = df.where(pd.notna(df), None)
+
         # Remove invalid rows
         df = df[df["Equipment"].notna() & df["Order"].notna()]
 
-        # Remove duplicate equipment in uploaded file (keep last)
+        # Remove duplicates in uploaded file (keep last)
         df = df.drop_duplicates(subset=["Equipment"], keep="last")
 
         inserted = 0
         updated = 0
 
         for _, row in df.iterrows():
+            equipment = none_if_nan(row["Equipment"])
+            order_number = none_if_nan(row["Order"])
+            vendor = none_if_nan(row["Vendor"])
+            delivery_date = none_if_nan(row["DeliveryDate"])
+            status = none_if_nan(row["Status"])
+            notes = none_if_nan(row["Notes"])
+
+            if not equipment or not order_number:
+                continue
+
             existing = db.query(OrderRecord).filter(
-                OrderRecord.equipment == row["Equipment"]
+                OrderRecord.equipment == equipment
             ).first()
 
             if existing:
-                existing.order_number = row["Order"]
-                existing.vendor = row["Vendor"]
-                existing.delivery_date = row["DeliveryDate"]
-                existing.status = row["Status"]
-                existing.notes = row["Notes"]
+                existing.order_number = order_number
+                existing.vendor = vendor
+                existing.delivery_date = delivery_date
+                existing.status = status
+                existing.notes = notes
                 updated += 1
             else:
                 new_order = OrderRecord(
-                    equipment=row["Equipment"],
-                    order_number=row["Order"],
-                    vendor=row["Vendor"],
-                    delivery_date=row["DeliveryDate"],
-                    status=row["Status"],
-                    notes=row["Notes"]
+                    equipment=equipment,
+                    order_number=order_number,
+                    vendor=vendor,
+                    delivery_date=delivery_date,
+                    status=status,
+                    notes=notes
                 )
                 db.add(new_order)
                 inserted += 1
