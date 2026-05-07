@@ -21,12 +21,14 @@ body {
 
 h1 {
   margin-bottom: 6px;
+  font-size: 32px;
 }
 
 .subtitle {
   margin-top: 0;
   margin-bottom: 24px;
   color: #6b7280;
+  font-size: 16px;
 }
 
 /* Dashboard cards */
@@ -77,6 +79,7 @@ h1 {
   border-left-color: #ef4444;
 }
 
+/* Card sections */
 .card {
   background: white;
   border-radius: 12px;
@@ -85,6 +88,12 @@ h1 {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
 }
 
+.card h2 {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+/* Layout */
 .row {
   display: flex;
   gap: 12px;
@@ -103,6 +112,7 @@ h1 {
   gap: 12px;
 }
 
+/* Inputs */
 input,
 select,
 textarea,
@@ -125,6 +135,7 @@ textarea {
   resize: vertical;
 }
 
+/* Buttons */
 button {
   background: #2563eb;
   color: white;
@@ -132,6 +143,7 @@ button {
   padding: 10px 14px;
   border-radius: 8px;
   cursor: pointer;
+  transition: opacity 0.2s ease;
 }
 
 button:hover {
@@ -157,6 +169,7 @@ button.small {
   flex-wrap: wrap;
 }
 
+/* Messages */
 .message {
   padding: 12px 14px;
   border-radius: 8px;
@@ -174,13 +187,16 @@ button.small {
   color: #991b1b;
 }
 
+/* Table */
 .table-wrap {
   overflow-x: auto;
+  width: 100%;
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 900px;
 }
 
 th,
@@ -193,6 +209,7 @@ td {
 
 th {
   background: #f9fafb;
+  white-space: nowrap;
 }
 
 .empty {
@@ -207,6 +224,7 @@ th {
   flex-wrap: wrap;
 }
 
+/* Mobile responsiveness */
 @media (max-width: 1100px) {
   .dashboard-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -214,6 +232,10 @@ th {
 }
 
 @media (max-width: 900px) {
+  .app-container {
+    padding: 16px;
+  }
+
   .grid {
     grid-template-columns: 1fr;
   }
@@ -221,10 +243,40 @@ th {
   .row {
     flex-direction: column;
   }
+
+  h1 {
+    font-size: 26px;
+  }
+
+  .dashboard-value {
+    font-size: 24px;
+  }
+
+  .card {
+    padding: 16px;
+  }
 }
 
 @media (max-width: 600px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
+  }
+
+  .button-row {
+    flex-direction: column;
+  }
+
+  button {
+    width: 100%;
+  }
+
+  th,
+  td {
+    padding: 10px;
+    font-size: 14px;
+  }
+
+  .subtitle {
+    font-size: 14px;
   }
 }
