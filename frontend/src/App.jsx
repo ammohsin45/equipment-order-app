@@ -3,7 +3,7 @@ import "./App.css";
 
 function App() {
   const [apiBase, setApiBase] = useState(
-    import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000"
+    import.meta.env.VITE_API_BASE || "https://equipment-order-app-production.up.railway.app"
   );
 
   const [orders, setOrders] = useState([]);
@@ -50,31 +50,40 @@ function App() {
 
   const showMessage = (type, text) => {
     setMessage({ type, text });
-    setTimeout(() => setMessage({ type: "", text: "" }), 3000);
+    setTimeout(() => {
+      setMessage({ type: "", text: "" });
+    }, 3000);
   };
 
   const loadSummary = async () => {
     try {
       const res = await fetch(`${apiBase}/orders/summary`);
       const data = await res.json();
+
       if (res.ok) {
         setSummary(data);
       }
     } catch (err) {
-      console.error(err);
+      console.error("Summary load failed:", err);
     }
   };
 
   const loadOrders = async () => {
     setLoading(true);
+
     try {
       const params = new URLSearchParams({
         page: String(page),
         page_size: String(pageSize),
       });
 
-      if (searchTerm.trim()) params.append("search", searchTerm.trim());
-      if (filterStatus && filterStatus !== "All") params.append("status", filterStatus);
+      if (searchTerm.trim()) {
+        params.append("search", searchTerm.trim());
+      }
+
+      if (filterStatus && filterStatus !== "All") {
+        params.append("status", filterStatus);
+      }
 
       const res = await fetch(`${apiBase}/orders?${params.toString()}`);
       const data = await res.json();
@@ -136,6 +145,7 @@ function App() {
     }
 
     const isEdit = !!editingEquipment;
+
     const url = isEdit
       ? `${apiBase}/orders/${encodeURIComponent(editingEquipment)}`
       : `${apiBase}/orders`;
@@ -160,7 +170,9 @@ function App() {
     try {
       const res = await fetch(url, {
         method: isEdit ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify(payload),
       });
 
@@ -170,7 +182,11 @@ function App() {
         throw new Error(data.detail || data.message || "Save failed");
       }
 
-      showMessage("success", isEdit ? "Order updated successfully" : "Order added successfully");
+      showMessage(
+        "success",
+        isEdit ? "Order updated successfully" : "Order added successfully"
+      );
+
       resetForm();
       setPage(1);
       await loadOrders();
@@ -267,7 +283,9 @@ function App() {
 
   const pageNumbers = useMemo(() => {
     const nums = [];
-    for (let i = 1; i <= totalPages; i++) nums.push(i);
+    for (let i = 1; i <= totalPages; i += 1) {
+      nums.push(i);
+    }
     return nums;
   }, [totalPages]);
 
@@ -283,27 +301,32 @@ function App() {
             <div className="dashboard-title">Total Orders</div>
             <div className="dashboard-value">{summary.total}</div>
           </div>
+
           <div className="dashboard-card open">
             <div className="dashboard-title">Open</div>
             <div className="dashboard-value">{summary.open}</div>
           </div>
+
           <div className="dashboard-card pending">
             <div className="dashboard-title">Pending</div>
             <div className="dashboard-value">{summary.pending}</div>
           </div>
+
           <div className="dashboard-card closed">
             <div className="dashboard-title">Closed</div>
             <div className="dashboard-value">{summary.closed}</div>
           </div>
+
           <div className="dashboard-card cancelled">
             <div className="dashboard-title">Cancelled</div>
             <div className="dashboard-value">{summary.cancelled}</div>
           </div>
         </div>
 
-        {/* API + Upload */}
+        {/* API + Excel Import */}
         <div className="card">
           <h2>API & Excel Import</h2>
+
           <div className="row">
             <input
               type="text"
@@ -335,7 +358,7 @@ function App() {
         )}
 
         <div className="grid">
-          {/* Form */}
+          {/* Add / Edit Form */}
           <div className="card">
             <h2>{editingEquipment ? `Edit ${editingEquipment}` : "Add New Order"}</h2>
 
@@ -354,25 +377,33 @@ function App() {
                 type="text"
                 placeholder="Order"
                 value={form.Order}
-                onChange={(e) => setForm({ ...form, Order: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, Order: e.target.value })
+                }
               />
 
               <input
                 type="text"
                 placeholder="Vendor"
                 value={form.Vendor}
-                onChange={(e) => setForm({ ...form, Vendor: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, Vendor: e.target.value })
+                }
               />
 
               <input
                 type="date"
                 value={form.DeliveryDate}
-                onChange={(e) => setForm({ ...form, DeliveryDate: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, DeliveryDate: e.target.value })
+                }
               />
 
               <select
                 value={form.Status}
-                onChange={(e) => setForm({ ...form, Status: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, Status: e.target.value })
+                }
               >
                 <option value="">Select Status</option>
                 <option value="Open">Open</option>
@@ -384,7 +415,9 @@ function App() {
               <textarea
                 placeholder="Notes"
                 value={form.Notes}
-                onChange={(e) => setForm({ ...form, Notes: e.target.value })}
+                onChange={(e) =>
+                  setForm({ ...form, Notes: e.target.value })
+                }
               />
 
               <div className="button-row">
@@ -398,7 +431,7 @@ function App() {
             </form>
           </div>
 
-          {/* Search / Filter */}
+          {/* Search / Filter / Pagination Controls */}
           <div className="card">
             <h2>Search / Filter</h2>
 
@@ -413,7 +446,9 @@ function App() {
             />
 
             <div className="button-row" style={{ marginTop: "12px", marginBottom: "12px" }}>
-              <button type="button" onClick={handleFindOne}>Find One</button>
+              <button type="button" onClick={handleFindOne}>
+                Find One
+              </button>
               <button
                 type="button"
                 className="secondary"
@@ -441,8 +476,9 @@ function App() {
             </select>
 
             <div className="page-size-row">
-              <label>Rows per page:</label>
+              <label htmlFor="page-size">Rows per page:</label>
               <select
+                id="page-size"
                 value={pageSize}
                 onChange={(e) => {
                   setPage(1);
@@ -476,6 +512,7 @@ function App() {
                   <th>Actions</th>
                 </tr>
               </thead>
+
               <tbody>
                 {orders.length === 0 ? (
                   <tr>
@@ -489,11 +526,19 @@ function App() {
                       <td>{row.Equipment}</td>
                       <td>{row.Order}</td>
                       <td>{row.Vendor || "-"}</td>
-                      <td>{row.DeliveryDate ? String(row.DeliveryDate).slice(0, 10) : "-"}</td>
+                      <td>
+                        {row.DeliveryDate
+                          ? String(row.DeliveryDate).slice(0, 10)
+                          : "-"}
+                      </td>
                       <td>{row.Status || "-"}</td>
                       <td>{row.Notes || "-"}</td>
                       <td className="action-cell">
-                        <button type="button" className="small" onClick={() => startEdit(row)}>
+                        <button
+                          type="button"
+                          className="small"
+                          onClick={() => startEdit(row)}
+                        >
                           Edit
                         </button>
                         <button
@@ -521,11 +566,18 @@ function App() {
                   <div><strong>Equipment:</strong> {row.Equipment}</div>
                   <div><strong>Order:</strong> {row.Order}</div>
                   <div><strong>Vendor:</strong> {row.Vendor || "-"}</div>
-                  <div><strong>Delivery Date:</strong> {row.DeliveryDate ? String(row.DeliveryDate).slice(0, 10) : "-"}</div>
+                  <div>
+                    <strong>Delivery Date:</strong>{" "}
+                    {row.DeliveryDate ? String(row.DeliveryDate).slice(0, 10) : "-"}
+                  </div>
                   <div><strong>Status:</strong> {row.Status || "-"}</div>
                   <div><strong>Notes:</strong> {row.Notes || "-"}</div>
                   <div className="button-row mobile-card-actions">
-                    <button type="button" className="small" onClick={() => startEdit(row)}>
+                    <button
+                      type="button"
+                      className="small"
+                      onClick={() => startEdit(row)}
+                    >
                       Edit
                     </button>
                     <button
@@ -547,7 +599,7 @@ function App() {
               type="button"
               className="secondary"
               disabled={page === 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
             >
               Prev
             </button>
@@ -569,7 +621,7 @@ function App() {
               type="button"
               className="secondary"
               disabled={page === totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
             >
               Next
             </button>
